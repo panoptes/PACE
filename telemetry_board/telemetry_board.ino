@@ -158,17 +158,10 @@ class DallasTemperatureHandler {
       }
     }
     void Collect() {
-      // Force readHumidity to actually talk to the device;
-      // otherwise will read at most every 2 seconds, which
-      // is sometimes just a little too far apart.
-      // Note that the underlying read() routine has some big
-      // delays (250ms and 40ms, plus some microsecond scale delays).
-      //      humidity_ = dht_.readHumidity(/*force=*/true);
-      // readTemperature will use the data collected by
-      // readHumidity, which is just fine.
-      //      temperature_ = dht_.readTemperature();
-
-      // Ask all of the sensors to start a temperature conversion.
+      // Ask all of the sensors to start a temperature "conversion"; I think
+      // this means the analog-to-digital conversion, which stores the result
+      // in a register in the sensor. requestTemperatures() will return when
+      // the conversion is complete.
       dt_.requestTemperatures();
       for (uint8_t i = 0; i < device_count_; i++) {
         DeviceInfo& device = devices_[i];
