@@ -9,9 +9,9 @@
    1) An Init() method that is called from setup.
    2) A Collect() method that is called during the sensor reading phase.
    3) A Report() method that is called to print out json data.
-   
+
    The serial input should be in this format:
-      two comma separated integers followed by a new line or carriage return. 
+      two comma separated integers followed by a new line or carriage return.
    The first integer specifies the digital output pin that controls the relay,
    and the second specifies the output value for that pin (0 or 1).
    If any other characters appear in the serial input, all serial input is ignored
@@ -24,6 +24,23 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <DHT.h>
+
+
+////////////////////////////////////////////////
+// __      __               _                 //
+// \ \    / /              (_)                //
+//  \ \  / /___  _ __  ___  _   ___   _ __    //
+//   \ \/ // _ \| '__|/ __|| | / _ \ | '_ \   //
+//    \  /|  __/| |   \__ \| || (_) || | | |  //
+//     \/  \___||_|   |___/|_| \___/ |_| |_|  //
+//                                            //
+////////////////////////////////////////////////
+
+// Please update the version identifier when you
+// make changes to this code. The value needs to
+// be in JSON format (i.e. quoted and escaped if
+// a string).
+#define JSON_VERSION_ID "\"2017-09-02\""
 
 // How often, in milliseconds, to emit a report.
 #define REPORT_INTERVAL_MS 2000
@@ -112,9 +129,9 @@ class DHTHandler {
     void Report() {
       // This is being added to a JSON dictionary, so print a comma
       // before the quoted name, which is then followed by a colon.
-      Serial.print(", \"humidity\":");
+      Serial.print(",\"humidity\":");
       Serial.print(humidity_);
-      Serial.print(", \"temp_00\":");
+      Serial.print(",\"temp_00\":");
       Serial.print(temperature_);
     }
 
@@ -158,10 +175,17 @@ class DallasTemperatureHandler {
       }
     }
     void Collect() {
-      // Ask all of the sensors to start a temperature "conversion"; I think
-      // this means the analog-to-digital conversion, which stores the result
-      // in a register in the sensor. requestTemperatures() will return when
-      // the conversion is complete.
+      // Force readHumidity to actually talk to the device;
+      // otherwise will read at most every 2 seconds, which
+      // is sometimes just a little too far apart.
+      // Note that the underlying read() routine has some big
+      // delays (250ms and 40ms, plus some microsecond scale delays).
+      //      humidity_ = dht_.readHumidity(/*force=*/true);
+      // readTemperature will use the data collected by
+      // readHumidity, which is just fine.
+      //      temperature_ = dht_.readTemperature();
+
+      // Ask all of the sensors to start a temperature conversion.
       dt_.requestTemperatures();
       for (uint8_t i = 0; i < device_count_; i++) {
         DeviceInfo& device = devices_[i];
@@ -172,7 +196,7 @@ class DallasTemperatureHandler {
       if (device_count_ > 0) {
         // This is being added to a JSON dictionary, so print a comma
         // before the quoted name, which is then followed by a colon.
-        Serial.print(", \"temperature\":[");
+        Serial.print(",\"temperature\":[");
         for (uint8_t i = 0; i < device_count_; i++) {
           if (i != 0) {
             Serial.print(",");
@@ -184,7 +208,7 @@ class DallasTemperatureHandler {
       }
     }
 
-    void printDeviceInfo() {
+    void PrintDeviceInfo() {
       for (uint8_t i = 0; i < device_count_; i++) {
         const DeviceInfo& device = devices_[i];
         const DeviceAddress& addr = device.address;
@@ -224,14 +248,14 @@ DallasTemperatureHandler<3> dt_handler(&ds);
 class BaseNameHandler {
   protected:
     BaseNameHandler(char* name)
-        : name_(name) {}
+      : name_(name) {}
 
     void PrintName() {
       // Print quoted name for JSON dictionary key. The decision of
       // whether to add a comma before this is made by the caller.
       Serial.print('"');
       Serial.print(name_);
-      Serial.print("\": ");
+      Serial.print("\":");
     }
 
   private:
@@ -240,8 +264,8 @@ class BaseNameHandler {
 
 class CurrentHandler : public BaseNameHandler {
   public:
-    CurrentHandler(int pin, char* name, float scale)
-        : BaseNameHandler(name), pin_(pin), scale_(scale) {}
+    CurrentHandler(char* name, int pin, float scale)
+      : BaseNameHandler(name), pin_(pin), scale_(scale) {}
     void Collect() {
       reading_ = analogRead(pin_);
       amps_ = reading_ * scale_;
@@ -263,6 +287,7 @@ class CurrentHandler : public BaseNameHandler {
     float amps_;
 };
 
+// One CurrentHandler instance for each of the current sensors.
 CurrentHandler current_handlers[] = {
   {"main", I_MAIN, main_amps_mult},
   {"fan", I_FAN, fan_amps_mult},
@@ -273,7 +298,7 @@ CurrentHandler current_handlers[] = {
 class DigitalInputHandler : public BaseNameHandler {
   public:
     DigitalInputHandler(char* name, int pin)
-        : BaseNameHandler(name), pin_(pin) {}
+      : BaseNameHandler(name), pin_(pin) {}
     void Collect() {
       reading_ = digitalRead(pin_);
     }
@@ -304,15 +329,15 @@ DigitalInputHandler di_handlers[] = {
 // Due to limitations of the Arduino preprocessor,
 // we must place the following all on one line:
 template<class T, int size> void ReportCollection(const char* name, T(&handlers)[size]) {
-  Serial.print(", \"");
+  Serial.print(",\"");
   Serial.print(name);
-  Serial.print("\": {");
+  Serial.print("\":{");
   bool first = true;
   for (auto& handler : handlers) {
     if (first) {
       first = false;
     } else {
-      Serial.print(", ");
+      Serial.print(",");
     }
     handler.Report();
   }
@@ -322,15 +347,15 @@ template<class T, int size> void ReportCollection(const char* name, T(&handlers)
 // Due to limitations of the Arduino preprocessor,
 // we must place the following all on one line:
 template<class T, int size> void PrintCollection(const char* name, T(&handlers)[size], void (T::*mf)()) {
-  Serial.print(", \"");
+  Serial.print(",\"");
   Serial.print(name);
-  Serial.print("\": {");
+  Serial.print("\":{");
   bool first = true;
   for (auto& handler : handlers) {
     if (first) {
       first = false;
     } else {
-      Serial.print(", ");
+      Serial.print(",");
     }
     (handler.*mf)();
   }
@@ -353,10 +378,12 @@ void Report(unsigned long now) {
   }
 
   // Print the collected values as JSON.
-  Serial.print("{\"name\":\"telemetry_board\", count:");
+  Serial.print("{\"name\":\"telemetry_board\",\"count\":");
   Serial.print(millis());
-  Serial.print(", \"num\":");
+  Serial.print(",\"num\":");
   Serial.print(++report_num);
+  Serial.print(",\"ver\":");
+  Serial.print(JSON_VERSION_ID);
 
   ReportCollection("power", di_handlers);
   PrintCollection("current", current_handlers, &CurrentHandler::ReportReading);
@@ -374,127 +401,158 @@ void Report(unsigned long now) {
 // the buffered characters.
 template <uint8_t kBufferSize>
 class CharBuffer {
-public:
-  CharBuffer() { Reset(); }
-  void Reset() {
-    write_cursor_ = read_cursor_ = 0;
-  }
-  bool Append(char c) {
-    if (write_cursor_ < buf_ + kBufferSize) {
-      buf_[write_cursor_++] = c;
-      return true;
+  public:
+    CharBuffer() {
+      Reset();
     }
-    return false;
-  }
-  bool Empty() {
-    return read_cursor_ >= write_cursor_;
-  }
-  char Next() {
-    return buf_[read_cursor_++];
-  }
-  char Peek() {
-    return buf_[read_cursor_];
-  }
-  bool ParseInt(int* output) {
-    int& v = *output;
-    v = 0;
-    size_t len = 0;
-    while (!Empty() && isdigit(Peek())) {
-      char c = Next();
-      v = v * 10 + c - '0';
-      ++len;
-      if (len > 5) {
-        return false;
+    void Reset() {
+      write_cursor_ = read_cursor_ = 0;
+    }
+    bool Append(char c) {
+      if (write_cursor_ < buf_ + kBufferSize) {
+        buf_[write_cursor_++] = c;
+        return true;
       }
-    }
-    return len > 0;
-  }
-  bool MatchAndConsume(char c) {
-    if (!Empty() && Peek() == c) {
       return false;
     }
-    Next();
-    return true;
-  }
+    bool Empty() {
+      return read_cursor_ >= write_cursor_;
+    }
+    char Next() {
+      return buf_[read_cursor_++];
+    }
+    char Peek() {
+      return buf_[read_cursor_];
+    }
+    bool ParseInt(int* output) {
+      int& v = *output;
+      v = 0;
+      size_t len = 0;
+      while (!Empty() && isdigit(Peek())) {
+        char c = Next();
+        v = v * 10 + c - '0';
+        ++len;
+        if (len > 5) {
+          return false;
+        }
+      }
+      return len > 0;
+    }
+    bool MatchAndConsume(char c) {
+      if (Empty() || Peek() != c) {
+        return false;
+      }
+      Next();
+      return true;
+    }
 
-private:
-  char buf_[kBufferSize];
-  uint8_t write_cursor_;
-  uint8_t read_cursor_;
+  private:
+    char buf_[kBufferSize];
+    uint8_t write_cursor_;
+    uint8_t read_cursor_;
 };
 
-CharBuffer<8> input_buffer;
-bool wait_for_new_line = false;
-unsigned long input_start_time = 0;
-
-// Allow the input line to end with NL, CR NL or CR.
-bool isNewLine(int c) {
-  return c == '\n' || c == '\r';
-}
-
-void processInputBuffer() {
-  int pin_num, pin_status;
-  if (input_buffer.ParseInt(&pin_num) &&
-      input_buffer.MatchAndConsume(',') &&
-      input_buffer.ParseInt(&pin_status) &&
-      input_buffer.Empty()) {
-    switch (pin_num) {
-      case COMP_RELAY:
-        /* The computer shutting itself off:
-            - Power down
-            - Wait 30 seconds
-            - Power up
-        */
-        if (pin_status == 0) {
-          turn_pin_off(COMP_RELAY);
-          delay(1000 * 30);
-          turn_pin_on(COMP_RELAY);
+// Accumulates a line, parses it and takes the requested action if it is valid.
+class SerialInputHandler {
+  public:
+    void Handle() {
+      while (Serial && Serial.available() > 0) {
+        int c = Serial.read();
+        if (wait_for_new_line_) {
+          if (IsNewLine(c)) {
+            wait_for_new_line_ = false;
+            input_buffer_.Reset();
+          }
+        } else if (IsNewLine(c)) {
+          ProcessInputBuffer();
+          wait_for_new_line_ = false;
+          input_buffer_.Reset();
+        } else if (isprint(c)) {
+          if (!input_buffer_.Append(static_cast<char>(c))) {
+            wait_for_new_line_ = true;
+          }
+        } else {
+          // Input is not an acceptable character.
+          wait_for_new_line_ = true;
         }
-        break;
-      case CAMERAS_RELAY:
-      case FAN_RELAY:
-      case WEATHER_RELAY:
-      case MOUNT_RELAY:
-        if (pin_status == 1) {
-          turn_pin_on(pin_num);
-        } else if (pin_status == 0) {
-          turn_pin_off(pin_num);
-        } else if (pin_status == 9) {
-          toggle_pin(pin_num);
-        }
-        break;
-      case LED_BUILTIN:
-        digitalWrite(pin_num, pin_status);
-        break;
+      }
     }
-  }
-}
 
-void HandleSerialInput() {
-  while (Serial && Serial.available() > 0) {
-    int c = Serial.read();
-    if (wait_for_new_line) {
-      if (isNewLine(c)) {
-        wait_for_new_line = false;
-        input_buffer.Reset();
-      }
-    } else if (isNewLine(c)) {
-      processInputBuffer();
-      wait_for_new_line = false;
-        input_buffer.Reset();
-    } else if (isprint(c)) {
-      if (input_buffer.Empty()) {
-        input_start_time = millis();
-      }
-      if (!input_buffer.Append(static_cast<char>(c))) {
-        wait_for_new_line = true;
-      }
-    } else {
-      // Input is too long or not an acceptable character.
-      wait_for_new_line = true;
+  private:
+    // Allow the input line to end with NL, CR NL or CR.
+    bool IsNewLine(int c) {
+      return c == '\n' || c == '\r';
     }
-  }
-}
+
+    void ProcessInputBuffer() {
+      int pin_num, pin_status;
+      if (input_buffer_.ParseInt(&pin_num) &&
+          input_buffer_.MatchAndConsume(',') &&
+          input_buffer_.ParseInt(&pin_status) &&
+          input_buffer_.Empty()) {
+        switch (pin_num) {
+          case COMP_RELAY:
+            /* The computer shutting itself off:
+                - Power down
+                - Wait 30 seconds
+                - Power up
+            */
+            if (pin_status == 0) {
+              turn_pin_off(COMP_RELAY);
+              delay(1000 * 30);
+              turn_pin_on(COMP_RELAY);
+            }
+            break;
+          case FAN_RELAY:
+          case CAMERAS_RELAY:
+          case WEATHER_RELAY:
+          case MOUNT_RELAY:
+            if (pin_status == 1) {
+              turn_pin_on(pin_num);
+            } else if (pin_status == 0) {
+              turn_pin_off(pin_num);
+            } else if (pin_status == 9) {
+              toggle_pin(pin_num);
+            }
+            break;
+          case LED_BUILTIN:
+            digitalWrite(pin_num, pin_status);
+            break;
+        }
+      }
+    }
+
+    CharBuffer<8> input_buffer_;
+    bool wait_for_new_line_{false};
+} serial_input_handler;
+
+// A simple count-down timer.
+class IntervalTimer {
+  public:
+    IntervalTimer(unsigned int interval_ms)
+      : interval_(interval_ms), remaining_(interval_ms) {}
+    bool HasExpired() {
+      unsigned long now = millis();
+      unsigned long elapsed = now - last_time_;
+      last_time_ = now;
+      // Note: not checking for elapsed being so large that it
+      // exceeds the ability to be represented in remaining_.
+      remaining_ -= elapsed;
+      if (remaining_ <= 0) {
+        remaining_ += interval_;
+        if (remaining_ < 0) {
+          remaining_ = interval_;
+        }
+        return true;
+      }
+      return false;
+    }
+
+  private:
+    unsigned long last_time_{0};
+    long remaining_;
+    const unsigned int interval_;
+};
 
 //////////////////////////////////////////////////////////////////////////////////
 // Primary Arduino defined methods: setup(), called once at start, and loop(),
@@ -523,31 +581,27 @@ void setup() {
   // Setup communications with the sensors.
   dht_handler.Init();
   dt_handler.Init();
-  dt_handler.printDeviceInfo();
+  dt_handler.PrintDeviceInfo();
 
   pinMode(AC_PIN, INPUT);
 }
 
 void loop() {
-  HandleSerialInput();
+  serial_input_handler.Handle();
 
   // Every REPORT_INTERVAL_MS we want to produce a report on sensor values,
   // and relay settings.
-  static unsigned long last_time = 0;
-  static long remaining = REPORT_INTERVAL_MS;
-  unsigned long now = millis();
-  unsigned long elapsed = now - last_time;
-  last_time = now;
-
-  if (elapsed >= remaining) {
-    toggle_led();
-    Report(now);
-    if (elapsed > REPORT_INTERVAL_MS) {
-      remaining = 0;
-    } else {
-      remaining = remaining - elapsed + REPORT_INTERVAL_MS;
+  static IntervalTimer report_timer(REPORT_INTERVAL_MS);
+  if (report_timer.HasExpired()) {
+    digitalWrite(LED_BUILTIN, HIGH);
+    Report(millis());
+    digitalWrite(LED_BUILTIN, LOW);
+  } else if (!Serial) {
+    // Do a rapid blink of the LED if there is no serial
+    // line connection.
+    static IntervalTimer fast_blink_timer(100);
+    if (fast_blink_timer.HasExpired()) {
+      toggle_led();
     }
-  } else {
-    remaining -= elapsed;
   }
 }
