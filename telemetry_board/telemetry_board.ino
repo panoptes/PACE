@@ -11,20 +11,22 @@
    3) A Report() method that is called to print out json data.
 
    The serial input should be in this format:
-      two comma separated integers followed by a new line or carriage return.
-   The first integer specifies the digital output pin that controls the relay,
-   and the second specifies the output value for that pin (0 or 1).
+      A,B<newline>
+   Where A and B are two positive integers. The <newline> can be an ASCII
+   new line or carriage return.
+   The first integer (A) specifies the digital output pin that controls the relay,
+   and the second (B) specifies the output value for that pin (0 or 1).
+   See "Digital output pins" below for a list of the relay pins.
    If any other characters appear in the serial input, all serial input is ignored
    until a new line or carriage return is received.
 */
 
-#include <stdlib.h>
 #include <ctype.h>
+#include <stdlib.h>
 
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <DHT.h>
-
 
 ////////////////////////////////////////////////
 // __      __               _                 //
@@ -129,9 +131,9 @@ class DHTHandler {
     void Report() {
       // This is being added to a JSON dictionary, so print a comma
       // before the quoted name, which is then followed by a colon.
-      Serial.print(",\"humidity\":");
+      Serial.print(", \"humidity\":");
       Serial.print(humidity_);
-      Serial.print(",\"temp_00\":");
+      Serial.print(", \"temp_00\":");
       Serial.print(temperature_);
     }
 
@@ -175,17 +177,10 @@ class DallasTemperatureHandler {
       }
     }
     void Collect() {
-      // Force readHumidity to actually talk to the device;
-      // otherwise will read at most every 2 seconds, which
-      // is sometimes just a little too far apart.
-      // Note that the underlying read() routine has some big
-      // delays (250ms and 40ms, plus some microsecond scale delays).
-      //      humidity_ = dht_.readHumidity(/*force=*/true);
-      // readTemperature will use the data collected by
-      // readHumidity, which is just fine.
-      //      temperature_ = dht_.readTemperature();
-
-      // Ask all of the sensors to start a temperature conversion.
+      // Ask all of the sensors to start a temperature "conversion"; I think
+      // this means the analog-to-digital conversion, which stores the result
+      // in a register in the sensor. requestTemperatures() will return when
+      // the conversion is complete.
       dt_.requestTemperatures();
       for (uint8_t i = 0; i < device_count_; i++) {
         DeviceInfo& device = devices_[i];
@@ -196,7 +191,7 @@ class DallasTemperatureHandler {
       if (device_count_ > 0) {
         // This is being added to a JSON dictionary, so print a comma
         // before the quoted name, which is then followed by a colon.
-        Serial.print(",\"temperature\":[");
+        Serial.print(", \"temperature\":[");
         for (uint8_t i = 0; i < device_count_; i++) {
           if (i != 0) {
             Serial.print(",");
@@ -247,9 +242,7 @@ DallasTemperatureHandler<3> dt_handler(&ds);
 // instance of a sub-class.
 class BaseNameHandler {
   protected:
-    BaseNameHandler(char* name)
-      : name_(name) {}
-
+    BaseNameHandler(char* name) : name_(name) {}
     void PrintName() {
       // Print quoted name for JSON dictionary key. The decision of
       // whether to add a comma before this is made by the caller.
@@ -326,30 +319,32 @@ DigitalInputHandler di_handlers[] = {
 /////////////////////////////////////////////////////////////////////////////////////////
 // General reporting code.
 
-// Due to limitations of the Arduino preprocessor,
-// we must place the following all on one line:
+// Due to limitations of the Arduino preprocessor, we must place the following all on one line:
 template<class T, int size> void ReportCollection(const char* name, T(&handlers)[size]) {
-  Serial.print(",\"");
+  // This is being added to a JSON dictionary, so print a comma
+  // before the quoted name, which is then followed by a colon.
+  Serial.print(", \"");
   Serial.print(name);
-  Serial.print("\":{");
+  Serial.print("\": {");
   bool first = true;
   for (auto& handler : handlers) {
     if (first) {
       first = false;
     } else {
-      Serial.print(",");
+      Serial.print(", ");
     }
     handler.Report();
   }
   Serial.print('}');
 }
 
-// Due to limitations of the Arduino preprocessor,
-// we must place the following all on one line:
+// Due to limitations of the Arduino preprocessor, we must place the following all on one line:
 template<class T, int size> void PrintCollection(const char* name, T(&handlers)[size], void (T::*mf)()) {
-  Serial.print(",\"");
+  // This is being added to a JSON dictionary, so print a comma
+  // before the quoted name, which is then followed by a colon.
+  Serial.print(", \"");
   Serial.print(name);
-  Serial.print("\":{");
+  Serial.print("\": {");
   bool first = true;
   for (auto& handler : handlers) {
     if (first) {
@@ -378,11 +373,11 @@ void Report(unsigned long now) {
   }
 
   // Print the collected values as JSON.
-  Serial.print("{\"name\":\"telemetry_board\",\"count\":");
+  Serial.print("{\"name\":\"telemetry_board\", \"count\":");
   Serial.print(millis());
-  Serial.print(",\"num\":");
+  Serial.print(", \"num\":");
   Serial.print(++report_num);
-  Serial.print(",\"ver\":");
+  Serial.print(", \"ver\":");
   Serial.print(JSON_VERSION_ID);
 
   ReportCollection("power", di_handlers);
@@ -503,8 +498,8 @@ class SerialInputHandler {
               turn_pin_on(COMP_RELAY);
             }
             break;
-          case FAN_RELAY:
           case CAMERAS_RELAY:
+          case FAN_RELAY:
           case WEATHER_RELAY:
           case MOUNT_RELAY:
             if (pin_status == 1) {
@@ -581,7 +576,7 @@ void setup() {
   // Setup communications with the sensors.
   dht_handler.Init();
   dt_handler.Init();
-  dt_handler.PrintDeviceInfo();
+  // dt_handler.PrintDeviceInfo();
 
   pinMode(AC_PIN, INPUT);
 }
@@ -597,8 +592,9 @@ void loop() {
     Report(millis());
     digitalWrite(LED_BUILTIN, LOW);
   } else if (!Serial) {
-    // Do a rapid blink of the LED if there is no serial
-    // line connection.
+    // Do a rapid blink of the LED if there is apparently no serial
+    // line connection. Note that we still call the serial input
+    // handler and print reports, just in case !Serial is wrong.
     static IntervalTimer fast_blink_timer(100);
     if (fast_blink_timer.HasExpired()) {
       toggle_led();
